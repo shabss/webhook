@@ -1,7 +1,9 @@
 
+import importlib
 import time
+import sys
 from datetime import datetime
-from typing import Dict
+from typing import Dict, ForwardRef
 
 
 class KafkaTopic:
@@ -40,9 +42,18 @@ class Redis:
         return key in db_dict
 
 
-
 class HTTPClient:
     pass
+
+
+class WorkerFactory:
+    def __init__(self, **params):
+        worker_class_str = params["worker_class"]
+        current_module = sys.modules[__name__]
+        self.worker_class = getattr(current_module, worker_class_str)
+
+    def create(self, pool, **params):
+        return self.worker_class(pool=pool, **params)
 
 
 class WorkersPool():
@@ -63,7 +74,7 @@ class WorkersPool():
 
 
 class Worker:
-    def __init__(self, pool: WorkerPool, **params):
+    def __init__(self, pool: WorkersPool, **params):
         self.pool = pool
         self.should_shutdown = False
 
@@ -73,13 +84,6 @@ class Worker:
     def stop(self):
         raise NotImplementedError()
 
-
-class WorkerFactory:
-    def __init__(self, **params):
-        pass
-
-    def create(self, **params):
-        pass
 
 
 class FromSenderWorker(Worker):
@@ -296,3 +300,6 @@ class WebHookProxy:
 
 
 
+if __name__ == '__main__':
+    webhook = WebHookProxy()
+    webhook.start()
