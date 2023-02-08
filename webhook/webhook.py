@@ -6,12 +6,52 @@ from datetime import datetime
 from typing import Dict, ForwardRef
 
 
-class KafkaTopic:
-    pass
+class KafkaServer:
+
+    def __init__(self):
+        self.topics = {}        # topic_name --> messages
+        self.consumers = {}     # consumer_name --> topic, pointer
+
+    def commit(self, consumer):
+        self.ptr += 1
 
 
-class KafkaClient:
-    pass
+g_kafka_server = KafkaServer()
+
+class KafkaConsumer:
+
+    TOTAL_CLIENTS = 0
+    def __init__(self, server_url, topic):
+        self.name = f"consumer{self.TOTAL_CLIENTS}"
+        self.TOTAL_CLIENTS += 1
+
+        self.topic = topic
+        self.kafka_server = g_kafka_server
+
+    def receive(self):
+        _, ptr = self.kafka_server.consumers.get(self.name, (None, 0))
+        while ptr >= len(self.kafka_server.topics.get(self.topic, [])):
+            time.sleep(1)
+
+        msg = self.kafka_server.topics[self.topic][ptr]
+        return msg
+
+    def commit(self):
+        topic, ptr = self.kafka_server.consumers.get(self.name, (None, 0))
+        if topic is not None:
+            return
+
+        ptr += 1
+        self.kafka_server.consumers[self.name] = self.topic, ptr
+
+
+class KafkaProducer:
+    def __init__(self, server_url, topic):
+        self.topic = topic
+        self.kafka_server = g_kafka_server
+
+    def send(self, msg):
+        self.kafka_server.topics[self.topic].append(msg)
 
 
 class Redis:
@@ -93,8 +133,8 @@ class FromSenderWorker(Worker):
         self.kafka_inbound_topic = params["kafka_inbound_topic"]
         self.kafka_outbound_topic = params["kafka_outbound_topic"]
         self.kafka_url = params["kafka_url"]
-        self.kafka_consumer = KafkaClient(self.kafka_url, self.kafka_inbound_topic)
-        self.kafka_producer = KafkaClient(self.kafka_url, self.kafka_outbound_topic)
+        self.kafka_consumer = KafkaConsumer(server_url=self.kafka_url, topic=self.kafka_inbound_topic)
+        self.kafka_producer = KafkaProducer(server_url=self.kafka_url, topic=self.kafka_outbound_topic)
 
         self.redis_url = params["redis_url"]
         self.redis_db = params["redis_db"]
@@ -148,10 +188,10 @@ class ToReceiverWorker(Worker):
 
         self.kafka_inbound_topic = params["kafka_inbound_topic"]
         self.kafka_url = params["kafka_url"]
-        self.kafka_consumer = KafkaClient(self.kafka_url, self.kafka_inbound_topic)
+        self.kafka_consumer = KafkaConsumer(self.kafka_url, self.kafka_inbound_topic)
 
         # ToDo: this is the queue that gets message back from reciever. Name this correctly
-        self.kafka_producer = KafkaClient(self.kafka_url, self.kafka_outbound_topic)
+        self.kafka_producer = KafkaProducer(self.kafka_url, self.kafka_outbound_topic)
 
         # ToDo: this is the queue that checks status and fetches message async
         # self.kafka_producer = KafkaClient(self.kafka_url, self.kafka_outbound_topic)
