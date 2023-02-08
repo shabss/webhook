@@ -99,12 +99,13 @@ class HTTPClient:
 
 class WorkerFactory:
     def __init__(self, **params):
+        self.params = params
         worker_class_str = params["worker_class"]
         current_module = sys.modules[__name__]
         self.worker_class = getattr(current_module, worker_class_str)
 
-    def create(self, pool, **params):
-        return self.worker_class(pool=pool, **params)
+    def create(self, pool):
+        return self.worker_class(pool=pool, **self.params)
 
 
 class WorkersPool():
@@ -112,7 +113,7 @@ class WorkersPool():
         self.factory = factory
         self.num_workers = num_workers
 
-        self.workers = [factory.create(self, **params) for _ in range(self.num_workers)]
+        self.workers = [factory.create(self) for _ in range(self.num_workers)]
 
     def start(self):
         for worker in self.workers:
@@ -134,7 +135,6 @@ class Worker:
 
     def stop(self):
         raise NotImplementedError()
-
 
 
 class FromSenderWorker(Worker):
@@ -316,7 +316,14 @@ class WebHookProxy:
         # 1. Receive message from sender (github) via "from_sender_queue" kafa topic,
         # 2. process it and
         # 3. send to "to_receiver_queue" kafka topic
-        self.from_sender_workers = WorkersPool(WorkerFactory(worker_class="FromSenderWorker"), num_workers=10)
+        self.from_sender_workers = WorkersPool(WorkerFactory(
+            worker_class="FromSenderWorker",
+            kafka_inbound_topic="from_sender_queue",
+            kafka_outbound_topic="to_receiver_queue",
+            kafka_url="kafka_url_not_needed_at_this_time",
+            redis_url="redis_url_not_needed_at_this_time",
+            redis_db="webhook"
+        ), num_workers=10)
 
         # Workers to:
         # 1. Receive message from "to_receiver_queue" kafka topic
@@ -324,7 +331,13 @@ class WebHookProxy:
         # 3. Post to receiver (example.com)
         # 4. If receiver repsonds synchronously then push the message to "from_receiver_queue" kafka topic
         #    otherwise send message to "fetch_receiver_async_queue" to ask another worker to fetch async
-        self.to_receiver_workers = WorkersPool(WorkerFactory(worker_class="ToReceiverWorker"), num_workers=10)
+        self.to_receiver_workers = WorkersPool(WorkerFactory(
+            worker_class="ToReceiverWorker",
+            kafka_inbound_topic="to_receiver_queue",
+            kafka_url="kafka_url_not_needed_at_this_time",
+            redis_url="redis_url_not_needed_at_this_time",
+            redis_db="webhook"
+        ), num_workers=10)
 
         # Workers to:
         # 1. Receive message from reciever in an async fashion kafka topic
