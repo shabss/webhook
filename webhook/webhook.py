@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Dict
 
 
-class KafkaServer:
+class KafkaTopic:
     pass
 
 
@@ -205,12 +205,12 @@ class ToReceiverWorker(Worker):
 
 class FromReceiverAsyncWorker(Worker):
     """
-    Recieve message from reciever in async fashion
+    Receive message from reciever in async fashion
     Gets response from an earlier post and pushes the response to backward direction
     queue of "from_receiver_queue"
     """
 
-    def __init__(selfpool, **params):
+    def __init__(self, pool, **params):
         super().__init__(pool, **params)
         # ToDo
 
@@ -223,10 +223,10 @@ class FromReceiverAsyncWorker(Worker):
 class WebHookProxy:
 
     def __init__(self):
-        # self.from_sender_queue = KafkaServer()
-        # self.to_receiver_queue = KafkaServer()
-        # self.from_receiver_queue = KafkaServer()
-        # self.fetch_receiver_async_queue = KafkaServer()
+        # self.from_sender_queue = KafkaTopic()
+        # self.to_receiver_queue = KafkaTopic()
+        # self.from_receiver_queue = KafkaTopic()
+        # self.fetch_receiver_async_queue = KafkaTopic()
 
         # self.messages_db = Redis()
         # self.receiver_config = Redis()
