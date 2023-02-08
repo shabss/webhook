@@ -154,7 +154,7 @@ class FromSenderWorker(Worker):
     def start(self):
         while not self.should_shutdown:
             try:
-                payload = self.kafka_consumer.recieve()
+                payload = self.kafka_consumer.receive()
 
                 source_id = payload["source_id"]
                 message_id = payload["message_id"]
@@ -190,6 +190,10 @@ class FromSenderWorker(Worker):
         return self.redis_client.contains(db="messages", key=(source_id, message_id))
 
 
+class ToSenderWorker(Worker):
+    pass
+
+
 class ToReceiverWorker(Worker):
 
     MESSAGE_TRACKING_DB = "message_tracking"
@@ -201,7 +205,8 @@ class ToReceiverWorker(Worker):
         self.kafka_url = params["kafka_url"]
         self.kafka_consumer = KafkaConsumer(self.kafka_url, self.kafka_inbound_topic)
 
-        # ToDo: this is the queue that gets message back from reciever. Name this correctly
+        # ToDo: this is the queue that gets message back from receiver. Name this correctly
+        self.kafka_outbound_topic = params["kafka_outbound_topic"]
         self.kafka_producer = KafkaProducer(self.kafka_url, self.kafka_outbound_topic)
 
         # ToDo: this is the queue that checks status and fetches message async
@@ -214,7 +219,7 @@ class ToReceiverWorker(Worker):
     def start(self):
         while not self.should_shutdown:
             try:
-                payload = self.kafka_consumer.recieve()
+                payload = self.kafka_consumer.receive()
 
                 source_id = payload["source_id"]
                 message_id = payload["message_id"]
@@ -225,7 +230,7 @@ class ToReceiverWorker(Worker):
                     time.sleep(1)
 
                 response = self.send_message(payload)
-                if not self.reciever_is_async(send_to):
+                if not self.receiver_is_async(send_to):
                     self.kafka_producer.send(response)
                 else:
                     # ToDo: if need to check status async then send message to another queue / worker
@@ -239,6 +244,11 @@ class ToReceiverWorker(Worker):
 
     def stop(self):
         pass
+
+    def receiver_is_async(self, receiver):
+
+        # ToDo: look at config and decide
+        return False
 
     def send_message(self, payload):
         source_id = payload["source_id"]
@@ -285,7 +295,7 @@ class ToReceiverWorker(Worker):
 
 class FromReceiverAsyncWorker(Worker):
     """
-    Receive message from reciever in async fashion
+    Receive message from receiver in async fashion
     Gets response from an earlier post and pushes the response to backward direction
     queue of "from_receiver_queue"
     """
@@ -334,25 +344,39 @@ class WebHookProxy:
         self.to_receiver_workers = WorkersPool(WorkerFactory(
             worker_class="ToReceiverWorker",
             kafka_inbound_topic="to_receiver_queue",
+            kafka_outbound_topic="from_receiver_queue",
             kafka_url="kafka_url_not_needed_at_this_time",
             redis_url="redis_url_not_needed_at_this_time",
             redis_db="webhook"
         ), num_workers=10)
 
         # Workers to:
-        # 1. Receive message from reciever in an async fashion kafka topic
-        # 2. Push recieved message to "from_receiver_queue"
-        self.from_receiver_async_workers = WorkersPool(WorkerFactory(worker_class="FromReceiverAsyncWorker"), num_workers=10)
+        # 1. Receive message from receiver in an async fashion kafka topic
+        # 2. Push received message to "from_receiver_queue"
+        self.from_receiver_async_workers = WorkersPool(
+            WorkerFactory(
+                worker_class="FromReceiverAsyncWorker",
+                kafka_outbound_topic="from_receiver_queue",
+                redis_url = "redis_url_not_needed_at_this_time",
+                redis_db = "webhook"
+            ), num_workers=10)
 
         # Workers to:
         # 1. Receive message from "from_receiver_queue"
         # 2. Process it
         # 3. Send message to sender (github)
-        self.from_receiver_workers = WorkersPool(WorkerFactory(worker_class="FromReceiverWorker"), num_workers=10)
+        self.from_receiver_workers = WorkersPool(
+            WorkerFactory(
+                worker_class="ToSenderWorker",
+                kafka_inbound_topic="from_receiver_queue",
+                redis_url="redis_url_not_needed_at_this_time",
+                redis_db="webhook"
+            ), num_workers=10)
 
     def start(self):
         self.from_sender_workers.start()
         self.to_receiver_workers.start()
+        self.from_receiver_async_workers.start()
         self.from_receiver_workers.start()
 
     def stop(self):
@@ -361,9 +385,8 @@ class WebHookProxy:
         self.from_receiver_workers.stop()
 
 
-
-
-
 if __name__ == '__main__':
     webhook = WebHookProxy()
     webhook.start()
+    webhook.wait_for_signal()
+    webhook.stop()
