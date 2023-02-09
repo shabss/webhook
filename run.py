@@ -1,5 +1,5 @@
 
-from webhook.webhook_proxy import WebHookProxy
+from webhook.webhook import WebHookProxy
 
 if __name__ == '__main__':
     webhook = WebHookProxy()
