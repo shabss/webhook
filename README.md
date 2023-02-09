@@ -68,10 +68,6 @@ We use **Sentry** for monitoring and exception tracking
 ToDo
 
 ## Data Flow
-### System Initialization
-
-1. 3 node Kafka server with the following topics:
-   1. *from_sender* topic that receives messages from sender, the pay 
 
 ### Forward Flow
 
