@@ -127,3 +127,8 @@ Workers are as follows:
                                                              .
                                                              .
     Sender <- ToSenderWorker -> [to_sender topic] <- ReceiverStatusAsyncWorker <- [HTTP GET] <- Receiver 
+
+
+## Possible Issues:
+1. ToReceiverWorker fails. Since receiver is not under our control, it is hard to detect in the forward path whether if HTTP POST has been sent before failure occurred. E.g it is possible that HTTP POST was receiver by the but failure happened when it tried to send us an ack. We also do not know if receiver is idempotent or not, perhaps it is maintaining a counter e.g. In this case the system will resend the message again, which will violate exactly once delivery guarantees.
+   1. A solution would be that receiver allows us to find the status of our message and responds with 404 if it has not seen it before.  
