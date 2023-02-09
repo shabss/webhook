@@ -55,7 +55,7 @@ class WebHookProxy:
         # 2. Push received message to "from_receiver_queue"
         self.from_receiver_async_workers = WorkersPool(
             WorkerFactory(
-                worker_class="FromReceiverAsyncWorker",
+                worker_class="ReceiverStatusAsyncWorker",
                 kafka_outbound_topic="from_receiver_queue",
                 redis_url = "redis_url_not_needed_at_this_time",
                 redis_db = "webhook"
@@ -67,8 +67,10 @@ class WebHookProxy:
         # 3. Send message to sender (github)
         self.from_receiver_workers = WorkersPool(
             WorkerFactory(
+                original_sender="original_sender",
                 worker_class="ToSenderWorker",
                 kafka_inbound_topic="from_receiver_queue",
+                kafka_url="kafka_url_not_needed_at_this_time",
                 redis_url="redis_url_not_needed_at_this_time",
                 redis_db="webhook"
             ), num_workers=10)

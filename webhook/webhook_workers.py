@@ -191,7 +191,7 @@ class ToReceiverWorker(Worker):
         return True
 
 
-class FromReceiverAsyncWorker(Worker):
+class ReceiverStatusAsyncWorker(Worker):
     """
     Receive message from receiver in async fashion
     Gets response from an earlier post and pushes the response to backward direction
