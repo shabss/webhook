@@ -126,7 +126,7 @@ class ToReceiverWorker(Worker):
                     time.sleep(1)
 
                 response = self.send_message(payload)
-                if not self.receiver_is_async(send_to):
+                if not self.is_receiver_async(send_to):
                     self.kafka_producer.send(response)
                 else:
                     # ToDo: if need to check status async then send message to another queue / worker
@@ -141,7 +141,7 @@ class ToReceiverWorker(Worker):
     def stop(self):
         pass
 
-    def receiver_is_async(self, receiver):
+    def is_receiver_async(self, receiver):
 
         # ToDo: look at config and decide
         return False
