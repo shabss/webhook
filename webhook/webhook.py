@@ -27,7 +27,7 @@ class KafkaServer:
 
     def commit_message(self, consumer_name):
         topic, ptr = self.consumers.get(consumer_name, (None, 0))
-        if topic is not None:
+        if topic is None:
             return
 
         ptr += 1
@@ -180,12 +180,12 @@ class FromSenderWorker(Worker):
 
     def register_message(self, source_id, message_id, payload):
 
-        # fixme: encode paylaod
+        # fixme: encode the paylaod
         self.redis_client.add(db="messages", key=(source_id, message_id), value=payload)
 
     def is_duplicate(self, source_id, message_id):
 
-        # fixme: handle the case when messages are move to seconadary storage
+        # fixme: handle the case when messages are move to secondary storage
         #        due to space constraints
         return self.redis_client.contains(db="messages", key=(source_id, message_id))
 
