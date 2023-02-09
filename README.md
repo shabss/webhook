@@ -38,6 +38,7 @@ We use **Sentry** for monitoring and exception tracking
 2. **to_sender**: This topic contains messages processed by the receiver and enqueued here for delivery to the sender. 
 3. **to_receiver_<receiver_name>**: These topics contains messages that needs to be delivered to the receiver for processing the webooks. One topic each for a receiver with one partition each. Having a topic per receiver helps with managing rate limits and one partition helps with message ordering. 
 4. **pending_from_receiver_<receiver_name>**: These topics store the events that are delivered to receiver but the response has not arrived yet. For each message in these topic we "ping" the receiver for a response and if one has arrived, we push it to "to_sender" topic.
+5. **failed_messages**: The topic contains all the messages that have failed
 
 ### Databases
 1. **messages**: Database that keeps track of webhook messages and to dedup duplicate messages. 
@@ -46,8 +47,9 @@ We use **Sentry** for monitoring and exception tracking
    1. Payload is in json format and contains the information about the webhook, including the receiver name
    1. Status: can be one of:
       1. ARRIVED
-      2. DELIVERED_TO_RECEIVER
-      3. RESPONSE_DELIVERED_TO_SENDER (aka DONE)
+      1. DELIVERED_TO_RECEIVER
+      1. RESPONSE_RECEIVED_FROM_RECEIVER
+      1. RESPONSE_DELIVERED_TO_SENDER (aka DONE)
 1. **message_tracking**: Database that contains message tracking information. This helps with retries in case of failure. 
    1. PK: (source_id, message_id), values: (num_retries, last_sent_timestamp)
 1. **message_ttl**: Database that assists with message tracking. When entries in this table expire, we need to retry the message again or fail.
@@ -65,7 +67,45 @@ We use **Sentry** for monitoring and exception tracking
 
 
 ### Workers
-ToDo
+Workers are as follows:
+1. **FromSenderWorker**: This worker does the following operations:
+   1. Read, without autocommit, message from the *from_sender* queue. 
+   2. Checks the message in *messages* database. If already present then drops it, i.e. commits the message on kafka and continues to read the next message
+   3. Otherwise, adds the message to *messages* database
+   4. Finds the receiver_name from message and sends the message to *to_receiver_<receiver_name>* topic
+   5. If any failure happens, it sends the message to *failed_messages* topic
+   6. Commits the message on kafka
+1. **ToSenderWorker**: 
+   1. Read, without autocommit, message from the *to_sender* queue.
+   2. Sends the message to the (original) Sender via http post
+      1. If send is successful:
+         1. Deletes message from *messages*, *message_tracking*, *message_ttl* databases
+         1. Commits the message on kafka
+      2. If not successful, waits and retries. if retries limit is reached then sends message to *failed_messages* topic
+1. **ToReceiverWorker**: This worker listens on *to_receiver_<receiver_name>* topic. Note that this specific to each receiver and has one partition. Thus, each worker is handling messages only for this receiver. The worker does the following operations:
+   1. Read, without autocommit, message from the *to_receiver_<receiver_name>* queue.
+   2. Checks the *receiver_config* and *message_tracking* databases to understand if rate limits have been reached for this receiver or num_retries have expired.
+      1. If rate limit has been reached, then waits for a while and tries again
+      2. If max retries have been reached then sends the message to *failed_messages* topic
+   1. Sends the message to receiver via HTTP POST
+   1. Updates the message status in *messages* database as DELIVERED_TO_RECEIVER
+   1. If response contains message results then:
+      1. Updates the message status in *messages* database as RESPONSE_RECEIVED_FROM_RECEIVER
+      2. sends the response to *to_sender* topic
+   1. If response does not contain results (that is message is accepted with results pending), then:
+      1. Sends a message to *pending_from_receiver_<receiver_name>*
+   1. If any failure happens, it sends the message to *failed_messages* topic
+   1. Commits the message on kafka
+1. **FromRecieverAsyncWorker**: This worker checks for response from a receiver for a particular message. 
+   1. Read, without autocommit, message from the *pending_from_receiver_<receiver_name>* queue.
+   1. Continuously pings the receiver to get message status and results. 
+      1. If results are available:
+         1. Updates the message status in *messages* database as RESPONSE_RECEIVED_FROM_RECEIVER
+         1. sends the response to *to_sender* topic
+      1. Otherwise waits for a certain amount of time and retries
+   1. Commits the message to kafka
+1. **Failed Messages Worker**:
+   2. ToDo
 
 ## Data Flow
 
@@ -73,7 +113,7 @@ ToDo
 
     Sender -> [from_sender topic] -> FromSenderWorker -> [to_receiver_<receiver_name> topic] -> ToReceiverWorker -> [HTTP POST] -> Receiver 
                                           |                                                            |
-                                        (dedup)                                                 (rate limit, retry)
+                              (dedup, message tracking)                                       (rate limit, retry)
 
 
 ### Backward Flow (synchronous)
