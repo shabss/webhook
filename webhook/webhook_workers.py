@@ -1,7 +1,7 @@
 
 import time
 
-from webhook.common import MESSAGES_DB, MESSAGE_TRACKING_DB, RECEIVER_CONFIG_DB
+from webhook.common import MESSAGES_DB, MESSAGE_TRACKING_DB, RECEIVER_CONFIG_DB, HTTPClient
 from webhook.kafka import KafkaConsumer, KafkaProducer
 from webhook.redis import RedisClient
 from webhook.worker_base import Worker
@@ -46,6 +46,7 @@ class FromSenderWorker(Worker):
     def register_message(self, source_id, message_id, payload):
 
         # fixme: encode the paylaod
+        # fixme: add message status
         self.redis_client.add(db=MESSAGES_DB, key=(source_id, message_id), value=payload)
 
     def is_duplicate(self, source_id, message_id):
@@ -56,7 +57,43 @@ class FromSenderWorker(Worker):
 
 
 class ToSenderWorker(Worker):
-    pass
+    def __init__(self, pool, **params):
+        super().__init__(pool, **params)
+        self.kafka_inbound_topic = params["kafka_inbound_topic"]
+        self.kafka_url = params["kafka_url"]
+        self.kafka_consumer = KafkaConsumer(self.kafka_url, self.kafka_inbound_topic)
+        self.original_sender = params["original_sender"]
+
+    def start(self):
+        while not self.should_shutdown:
+            payload = None
+            result = None
+            try:
+                payload = self.kafka_consumer.receive()
+                message = payload["message"]
+                success, result = self.send_message(message)
+                if not success:
+                    raise RuntimeError("sending messages to original sender was unsuccessful")
+
+                # Todo: perform message tracking stuff
+
+                self.kafka_consumer.commit()
+            except Exception as ex:
+                # ToDo: report error here also
+                self.report_error(payload, result, ex)
+
+
+    def send_message(self, message):
+        client = HTTPClient(self.original_sender, 80)
+        result = client.post(message)
+        if result["code"] == 200:
+            return True, {}
+        else:
+            return False, result
+
+    def report_error(self, payload, result, exception):
+        # toDo: 1) send to sentry 2) move this function to base class
+        pass
 
 
 class ToReceiverWorker(Worker):
@@ -121,6 +158,8 @@ class ToReceiverWorker(Worker):
         # ToDo:
         # 1. Update message status that it is sent to receiver
         # 2. Update message tracking db
+        #    a) update last sent timestamp and increment num sent
+        #    b) setup a TTL on that message, to trigger retries
 
         try:
             num_messages, last_sent = self.redis_client.get(db=MESSAGE_TRACKING_DB, key=receiver)
